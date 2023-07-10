@@ -5,7 +5,7 @@ import { Literal } from "data-model/value";
 import * as P from "parsimmon";
 import emojiRegex from "emoji-regex";
 
-/** A parsed inline field. */
+/** A parsed inline field. Or a full-line field. */
 export interface InlineField {
     /** The raw parsed key. */
     key: string;
@@ -18,7 +18,7 @@ export interface InlineField {
     /** The end column of the field. */
     end: number;
     /** If this inline field was defined via a wrapping ('[' or '('), then the wrapping that was used. */
-    wrapping?: string;
+    wrapping?: '[' | '(' | 'emoji-shorthand';
 }
 
 /** The wrapper characters that can be used to define an inline field. */
@@ -95,7 +95,7 @@ function findSpecificInlineField(line: string, start: number): InlineField | und
         start: start,
         startValue: key.valueIndex,
         end: value.endIndex,
-        wrapping: open,
+        wrapping: open as any
     };
 }
 
