@@ -141,6 +141,7 @@ export function inlinePlugin(app: App, index: FullIndex, settings: DataviewSetti
                 this.component = new Component();
                 this.component.load();
                 this.decorations = this.inlineRender(view) ?? Decoration.none;
+
             }
 
             update(update: ViewUpdate) {
@@ -246,12 +247,8 @@ export function inlinePlugin(app: App, index: FullIndex, settings: DataviewSetti
                 if (!exists) {
                     const currentFile = app.workspace.getActiveFile();
                     if (!currentFile) return;
-                    const newDeco = this.createFieldWidget(view, line, field)?.value;
-                    if (newDeco) {
-                        this.decorations = this.decorations.update({
-                            add: [{ from: line.from+field.start, to: line.from+field.end, value: newDeco }],
-                        });
-                    }
+                    const newDeco = this.createFieldWidget(view, line, field);
+                    this.decorations = this.decorations.update({ add: newDeco, sort: true });
                 }
             }
 
@@ -307,7 +304,7 @@ export function inlinePlugin(app: App, index: FullIndex, settings: DataviewSetti
             }
 
             isInlineQuery(view: EditorView, start: number, end: number) {
-                const content = view.state.doc.sliceString(start, end);
+                const content = view.state.sliceDoc(start, end);
                 return content.startsWith(settings.inlineQueryPrefix)
                     || content.startsWith(settings.inlineJsQueryPrefix);
             }
@@ -336,7 +333,7 @@ export function inlinePlugin(app: App, index: FullIndex, settings: DataviewSetti
                         for (const field of extractInlineFields(line.text)) {
                             if (!this.fieldRenderInfo(view, line, field).render) return;
                             const widget = this.createFieldWidget(view, line, field);
-                            widgets.push(widget);
+                            widgets.concat(widget);
                         }
                     }
                     // Inline queries: Need DOM to replace code block surrounding it
@@ -362,40 +359,99 @@ export function inlinePlugin(app: App, index: FullIndex, settings: DataviewSetti
              * @param line The line which the field sits on
              * @param field The field to create a widget for
              */
-            createFieldWidget(view: EditorView, line: Line, field: InlineField): Range<Decoration> {
-                const el = createSpan({
-                    cls: ["dataview", "dataview-inline-field", `dataview-inline-field-style-${settings.inlineFieldDisplayMode.toLowerCase()}`]
+            createFieldWidget(view: EditorView, line: Line, field: InlineField): Range<Decoration>[] {
+                // TODO: This highlighting method can also work in source mode.
+
+                // Whitespace information
+                const key = view.state.sliceDoc(line.from+field.start+1, line.from+field.startValue-2);
+                const value = view.state.sliceDoc(line.from+field.startValue, line.from+field.end-1);
+                const keyLeftWS = key.length-key.trimStart().length;
+                const keyRightWS = key.length-key.trimEnd().length;
+                const valueLeftWS = value.length-value.trimStart().length;
+                const valueRightWS = value.length-value.trimEnd().length;
+
+                // Convenience variables
+                // Example: "[   key   ::   value   ]"
+                const openBracketPos = (line.from+field.start);                  // '[   '
+                const keyPos = (line.from+field.start+1) + keyLeftWS;            // 'key'
+                const colonPos = (line.from+field.startValue-2) - keyRightWS;    // '   ::   '
+                const valuePos = (line.from+field.startValue) + valueLeftWS;     // 'value'
+                const closeBracketPos = (line.from+field.end-1) - valueRightWS;  // '   ]'
+                const fieldEndPos = (line.from+field.end);
+
+                // The field is from the open bracket to the close bracket
+                const fieldFrom = openBracketPos;
+
+                // Sanity check (do not delete, use it!!)
+                console.log({
+                    complete_field: view.state.sliceDoc(fieldFrom,fieldEndPos),
+                    openBracket: view.state.sliceDoc(openBracketPos,keyPos),
+                    key: view.state.sliceDoc(keyPos,colonPos),
+                    colon: view.state.sliceDoc(colonPos,valuePos),
+                    value: view.state.sliceDoc(valuePos,closeBracketPos),
+                    closeBracket: view.state.sliceDoc(closeBracketPos,fieldEndPos)
                 });
 
-                if (field.wrapping === "(") {
-                    el.appendChild(createSpan({
-                        cls: ["dataview", "inline-field-value", "inline-value-standalone"],
-                        text: field.value
-                    }))
-                } else if (field.wrapping === "[") {
-                    el.appendChild(createSpan({
-                        cls: ["dataview", "inline-field-key"],
-                        text: field.key
-                    }))
-                    el.appendChild(createSpan({
-                        cls: ["dataview", "inline-field-value"],
-                        text: field.value
-                    }))
-                }
+                // More convenience constants
+                /** Hide the range. */
+                const hide = Decoration.replace({});
+                /** Render range as a standalone value. */
+                const markStandaloneValue = Decoration.mark({
+                    tagName: 'span', class: "dataview inline-field-standalone-value"
+                });
+                /** Render range as a key. */
+                const markKey = Decoration.mark({
+                    tagName: 'span', class: "dataview inline-field-key"
+                });
+                /** Render range as a value. */
+                const markValue = Decoration.mark({
+                    tagName: 'span', class: "dataview inline-field-value"
+                })
+                const markField = Decoration.mark({
+                    tagName: 'span',
+                    class: `dataview inline-field dataview-field-style-${settings.inlineFieldDisplayMode.toLowerCase()}`
+                })
 
-                return Decoration.replace({
-                    widget: new InlineWidget([], view.state.doc.sliceString(line.from+field.start, line.from+field.end), el, view),
-                    inclusive: false,
-                    block: false
-                }).range(line.from+field.start, line.from+field.end);
+                if (field.wrapping === "(") {
+                    return [
+                        // Mark the field
+                        markField.range(fieldFrom, fieldEndPos),
+                        // Hide the `[key::` part.
+                        hide.range(openBracketPos, valuePos),
+                        // Show the `value` part.
+                        markStandaloneValue.range(valuePos, closeBracketPos),
+                        // Hide the `]` part.
+                        hide.range(closeBracketPos,fieldEndPos)
+                    ];
+                } else if (field.wrapping === "[") {
+                    return [
+                        // Mark the field
+                        markField.range(fieldFrom, fieldEndPos),
+                        // Hide the `[` part.
+                        hide.range(openBracketPos, keyPos),
+                        // Show the `key` part.
+                        markKey.range(keyPos, colonPos),
+                        // Hide the `::` part.
+                        hide.range(colonPos, valuePos),
+                        // Show the `value` part.
+                        markValue.range(valuePos, closeBracketPos),
+                        // Hide the `]` part.
+                        hide.range(closeBracketPos,fieldEndPos)
+                    ];
+                } else if (field.wrapping === "emoji-shorthand") {
+                    // To hand emoji-shorthand you have to enable parsing them where
+                    // we originally get the `InlineField`s
+                    return [];
+                }
+                return [];
             }
 
             createQueryWidget(node: SyntaxNode, view: EditorView, currentFile: TFile) {
                 // safety net against unclosed inline code
-                if (view.state.doc.sliceString(node.to, node.to + 1) === "\n") {
+                if (view.state.sliceDoc(node.to, node.to + 1) === "\n") {
                     return;
                 }
-                const text = view.state.doc.sliceString(node.from, node.to);
+                const text = view.state.sliceDoc(node.from, node.to);
                 let code: string = "";
                 let result: Literal = "";
                 const PREAMBLE: string = "const dataview=this;const dv=this;";
@@ -404,7 +460,7 @@ export function inlinePlugin(app: App, index: FullIndex, settings: DataviewSetti
                 });
                 /* If the query result is predefined text (e.g. in the case of errors), set innerText to it.
                  * Otherwise, pass on an empty element and fill it in later.
-                 * This is necessary because {@link InlineQueryWidget.toDOM} is synchronous but some rendering
+                 * This is necessary because {@link InlineWidget.toDOM} is synchronous but some rendering
                  * asynchronous.
                  */
                 const isQuery = text.startsWith(settings.inlineQueryPrefix);
