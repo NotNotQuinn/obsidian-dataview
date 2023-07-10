@@ -52,7 +52,7 @@ function selectionAndRangeOverlap(selection: EditorSelection, rangeFrom: number,
     return false;
 }
 
-class InlineWidget extends WidgetType {
+class InlineQueryWidget extends WidgetType {
     constructor(
         readonly cssClasses: string[],
         readonly rawQuery: string,
@@ -64,7 +64,7 @@ class InlineWidget extends WidgetType {
 
     // Widgets only get updated when the raw query changes/the element gets focus and loses it
     // to prevent redraws when the editor updates.
-    eq(other: InlineWidget): boolean {
+    eq(other: InlineQueryWidget): boolean {
         if (other.rawQuery === this.rawQuery) {
             // change CSS classes without redrawing the element
             for (let value of other.cssClasses) {
@@ -164,7 +164,7 @@ export function inlinePlugin(app: App, index: FullIndex, settings: DataviewSetti
                         from,
                         to,
                         enter: ({ node }) => {
-                            const { render, isQuery } = this.renderNode(view, node);
+                            const { render, isQuery } = this.renderInfo(view, node);
                             if (!render && isQuery) {
                                 this.removeDeco(node);
                                 return;
@@ -208,36 +208,26 @@ export function inlinePlugin(app: App, index: FullIndex, settings: DataviewSetti
             }
 
             // checks whether a node should get rendered/unrendered
-            renderNode(view: EditorView, node: SyntaxNode) {
-                const type = node.type;
-                // current node is inline code
-                const tokenProps = type.prop<String>(tokenClassNodeProp);
-                const props = new Set(tokenProps?.split(" "));
-                if (props.has("inline-code") && !props.has("formatting")) {
-                    // contains the position of inline code
-                    const start = node.from;
-                    const end = node.to;
-                    // don't continue if current cursor position and inline code node (including formatting
-                    // symbols) overlap
-                    const selection = view.state.selection;
-                    if (selectionAndRangeOverlap(selection, start - 1, end + 1)) {
-                        if (this.isInlineQuery(view, start, end)) {
-                            return { render: false, isQuery: true };
-                        } else {
-                            return { render: false, isQuery: false };
-                        }
-                    } else if (this.isInlineQuery(view, start, end)) {
-                        return { render: true, isQuery: true };
-                    }
-                }
-                return { render: false, isQuery: false };
+            renderInfo(view: EditorView, node: SyntaxNode) {
+                const properties = new Set(node.type.prop<String>(tokenClassNodeProp)?.split(" "));
+                const isSelected = selectionAndRangeOverlap(view.state.selection, node.from - 1, node.to + 1);
+
+                const isInlineQuery =
+                    properties.has("inline-code") // is inline code block
+                    && !properties.has("formatting") // is NOT formatting, like a backtick
+                    && this.isInlineQuery(view, node.from, node.to); // and is a query
+
+                return {
+                    // Render if not selected
+                    render: isInlineQuery && !isSelected,
+                    isQuery: isInlineQuery
+                };
             }
 
             isInlineQuery(view: EditorView, start: number, end: number) {
-                const text = view.state.doc.sliceString(start, end);
-                const isInlineQuery =
-                    text.startsWith(settings.inlineQueryPrefix) || text.startsWith(settings.inlineJsQueryPrefix);
-                return isInlineQuery;
+                const content = view.state.doc.sliceString(start, end);
+                return content.startsWith(settings.inlineQueryPrefix)
+                    || content.startsWith(settings.inlineJsQueryPrefix);
             }
 
             inlineRender(view: EditorView) {
@@ -260,7 +250,8 @@ export function inlinePlugin(app: App, index: FullIndex, settings: DataviewSetti
                         from,
                         to,
                         enter: ({ node }) => {
-                            if (!this.renderNode(view, node).render) return;
+                            console.log({from: node.from, to: node.to})
+                            if (!this.renderInfo(view, node).render) return;
                             const widget = this.renderWidget(node, view, currentFile);
                             if (widget) {
                                 widgets.push(widget);
@@ -358,7 +349,7 @@ export function inlinePlugin(app: App, index: FullIndex, settings: DataviewSetti
                 const classes = getCssClasses(props);
 
                 return Decoration.replace({
-                    widget: new InlineWidget(classes, code, el, view),
+                    widget: new InlineQueryWidget(classes, code, el, view),
                     inclusive: false,
                     block: false,
                 }).range(start - 1, end + 1);
