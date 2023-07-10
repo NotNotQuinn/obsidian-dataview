@@ -264,7 +264,6 @@ export function inlinePlugin(app: App, index: FullIndex, settings: DataviewSetti
                         from,
                         to,
                         enter: ({ node }) => {
-                            console.log({from: node.from, to: node.to})
                             if (!this.renderInfo(view, node).render) return;
                             const widget = this.createQueryWidget(node, view, currentFile);
                             if (widget) {
