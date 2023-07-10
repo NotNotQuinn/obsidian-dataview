@@ -28,7 +28,7 @@
  * */
 
 import { Decoration, DecorationSet, EditorView, PluginValue, ViewPlugin, ViewUpdate, WidgetType } from "@codemirror/view";
-import { EditorSelection, Range } from "@codemirror/state";
+import { EditorSelection, Line, Range } from "@codemirror/state";
 import { syntaxTree, tokenClassNodeProp } from "@codemirror/language";
 import { DataviewSettings } from "../settings";
 import { FullIndex } from "../data-index";
@@ -37,10 +37,11 @@ import { DataviewApi } from "../api/plugin-api";
 import { tryOrPropogate } from "../util/normalize";
 import { parseField } from "../expression/parse";
 import { executeInline } from "../query/engine";
-import { Literal } from "../data-model/value";
+import { Literal } from '../data-model/value';
 import { DataviewInlineApi } from "../api/inline-api";
 import { renderValue } from "./render";
 import { SyntaxNode } from "@lezer/common";
+import { InlineField, extractInlineFields } from "data-import/inline-field";
 
 function selectionAndRangeOverlap(selection: EditorSelection, rangeFrom: number, rangeTo: number) {
     for (const range of selection.ranges) {
@@ -52,20 +53,20 @@ function selectionAndRangeOverlap(selection: EditorSelection, rangeFrom: number,
     return false;
 }
 
-class InlineQueryWidget extends WidgetType {
+class InlineWidget extends WidgetType {
     constructor(
         readonly cssClasses: string[],
-        readonly rawQuery: string,
+        readonly sourceString: string,
         private el: HTMLElement,
-        private view: EditorView
+        private view: EditorView,
     ) {
         super();
     }
 
-    // Widgets only get updated when the raw query changes/the element gets focus and loses it
+    // Widgets only get updated when the source changes/the element gets focus and loses it
     // to prevent redraws when the editor updates.
-    eq(other: InlineQueryWidget): boolean {
-        if (other.rawQuery === this.rawQuery) {
+    eq(other: InlineWidget): boolean {
+        if (other.sourceString === this.sourceString) {
             // change CSS classes without redrawing the element
             for (let value of other.cssClasses) {
                 if (!this.cssClasses.includes(value)) {
@@ -110,17 +111,6 @@ class InlineQueryWidget extends WidgetType {
     }
 }
 
-// class InlineFieldWidget extends WidgetType {
-//     constructor(
-//
-//     ) {
-//         super();
-//     }
-//     toDOM(view: EditorView): HTMLElement {
-//         throw new Error("Method not implemented.");
-//     }
-// }
-
 function getCssClasses(props: Set<string>): string[] {
     const classes: string[] = [];
     if (props.has("strong")) {
@@ -150,7 +140,7 @@ export function inlinePlugin(app: App, index: FullIndex, settings: DataviewSetti
             constructor(view: EditorView) {
                 this.component = new Component();
                 this.component.load();
-                this.decorations = this.inlineQueryRender(view) ?? Decoration.none;
+                this.decorations = this.inlineRender(view) ?? Decoration.none;
             }
 
             update(update: ViewUpdate) {
@@ -169,32 +159,70 @@ export function inlinePlugin(app: App, index: FullIndex, settings: DataviewSetti
                     return;
                 }
                 if (update.viewportChanged /*&& update.selectionSet*/) {
-                    this.decorations = this.inlineQueryRender(update.view) ?? Decoration.none;
+                    this.decorations = this.inlineRender(update.view) ?? Decoration.none;
                     return;
                 }
             }
 
+            updateInlineFields(view: EditorView) {
+
+            }
+
             updateTree(view: EditorView) {
                 for (const { from, to } of view.visibleRanges) {
+                    // Inline fields
+                    const lineFrom = view.state.doc.lineAt(from).number;
+                    const lineTo = view.state.doc.lineAt(to).number;
+
+                    for (let i = lineFrom; i <= lineTo; i++) {
+                        const line = view.state.doc.line(i);
+
+                        for (const field of extractInlineFields(line.text)) {
+                            const { render } = this.fieldRenderInfo(view, line, field);
+                            if (render) {
+                                this.addFieldDecorator(view, line, field);
+                            } else {
+                                this.removeFieldDecorator(line, field);
+                            }
+                        }
+                    }
+
+                    // Inline queries
                     syntaxTree(view.state).iterate({
                         from,
                         to,
                         enter: ({ node }) => {
-                            const { render, isQuery } = this.renderInfo(view, node);
+                            const { render, isQuery } = this.queryRenderInfo(view, node);
                             if (!render && isQuery) {
-                                this.removeDeco(node);
-                                return;
-                            } else if (!render) {
-                                return;
+                                this.removeQueryDecorator(node);
                             } else if (render) {
-                                this.addDeco(node, view);
+                                this.addQueryDecorator(node, view);
                             }
                         },
                     });
                 }
             }
 
-            removeDeco(node: SyntaxNode) {
+            /**
+             * Removes a field decorator from the screen, revealing the underlying text.
+             * @param line The line the field is found on
+             * @param field The field
+             */
+            removeFieldDecorator(line: Line, field: InlineField) {
+                this.decorations.between(line.from+field.start, line.from+field.end, (from, to, _value) => {
+                    this.decorations = this.decorations.update({
+                        filterFrom: from,
+                        filterTo: to,
+                        filter: (_from, _to, _value) => false,
+                    });
+                });
+            }
+
+            /**
+             * Removes a decorator from an inline query, revealing the underlying text.
+             * @param node The codeblock node of the query
+             */
+            removeQueryDecorator(node: SyntaxNode) {
                 this.decorations.between(node.from - 1, node.to + 1, (from, to, _value) => {
                     this.decorations = this.decorations.update({
                         filterFrom: from,
@@ -204,25 +232,65 @@ export function inlinePlugin(app: App, index: FullIndex, settings: DataviewSetti
                 });
             }
 
-            addDeco(node: SyntaxNode, view: EditorView) {
+            /**
+             * Adds a field decorator back to the screen.
+             * @param view The EditorView
+             * @param line The line the field is found on
+             * @param field The field
+             */
+            addFieldDecorator(view: EditorView, line: Line, field: InlineField) {
                 let exists = false;
-                this.decorations.between(node.from - 1, node.to + 1, (_from, _to, _value) => {
+                this.decorations.between(line.from+field.start, line.from+field.end, (_from, _to, _value) => {
                     exists = true;
                 });
                 if (!exists) {
                     const currentFile = app.workspace.getActiveFile();
                     if (!currentFile) return;
-                    const newDeco = this.createQueryWidget(node, view, currentFile)?.value;
+                    const newDeco = this.createFieldWidget(view, line, field)?.value;
                     if (newDeco) {
                         this.decorations = this.decorations.update({
-                            add: [{ from: node.from - 1, to: node.to + 1, value: newDeco }],
+                            add: [{ from: line.from+field.start, to: line.from+field.end, value: newDeco }],
                         });
                     }
                 }
             }
 
+            /**
+            * Adds a query back to the screen
+            * @param node The codeblock node of the query
+            * @param view The EditorView
+            */
+           addQueryDecorator(node: SyntaxNode, view: EditorView) {
+               let exists = false;
+               this.decorations.between(node.from - 1, node.to + 1, (_from, _to, _value) => {
+                   exists = true;
+               });
+               if (!exists) {
+                   const currentFile = app.workspace.getActiveFile();
+                   if (!currentFile) return;
+                   const newDeco = this.createQueryWidget(node, view, currentFile)?.value;
+                   if (newDeco) {
+                       this.decorations = this.decorations.update({
+                           add: [{ from: node.from - 1, to: node.to + 1, value: newDeco }],
+                       });
+                   }
+               }
+           }
+
+            /**
+             * Get render information
+             * @param view The EditorView
+             * @param line The line the field is found on
+             * @param field The field to check
+             * @returns Rendering information about the field
+             */
+            fieldRenderInfo(view: EditorView, line: Line, field: InlineField): { render: any; } {
+                const isSelected = selectionAndRangeOverlap(view.state.selection, line.from+field.start, line.from+field.end);
+                return { render: !isSelected };
+            }
+
             // checks whether a node should get rendered/unrendered
-            renderInfo(view: EditorView, node: SyntaxNode) {
+            queryRenderInfo(view: EditorView, node: SyntaxNode) {
                 const properties = new Set(node.type.prop<String>(tokenClassNodeProp)?.split(" "));
                 const isSelected = selectionAndRangeOverlap(view.state.selection, node.from - 1, node.to + 1);
 
@@ -244,7 +312,7 @@ export function inlinePlugin(app: App, index: FullIndex, settings: DataviewSetti
                     || content.startsWith(settings.inlineJsQueryPrefix);
             }
 
-            inlineQueryRender(view: EditorView) {
+            inlineRender(view: EditorView) {
                 // still doesn't work as expected for tables and callouts
                 if (!index.initialized) return;
                 const currentFile = app.workspace.getActiveFile();
@@ -260,11 +328,23 @@ export function inlinePlugin(app: App, index: FullIndex, settings: DataviewSetti
                  */
 
                 for (const { from, to } of view.visibleRanges) {
+                    // Inline fields
+                    const lineFrom = view.state.doc.lineAt(from).number;
+                    const lineTo = view.state.doc.lineAt(to).number;
+                    for (let i = lineFrom; i <= lineTo; i++) {
+                        const line = view.state.doc.line(i);
+                        for (const field of extractInlineFields(line.text)) {
+                            if (!this.fieldRenderInfo(view, line, field).render) return;
+                            const widget = this.createFieldWidget(view, line, field);
+                            widgets.push(widget);
+                        }
+                    }
+                    // Inline queries: Need DOM to replace code block surrounding it
                     syntaxTree(view.state).iterate({
                         from,
                         to,
                         enter: ({ node }) => {
-                            if (!this.renderInfo(view, node).render) return;
+                            if (!this.queryRenderInfo(view, node).render) return;
                             const widget = this.createQueryWidget(node, view, currentFile);
                             if (widget) {
                                 widgets.push(widget);
@@ -274,6 +354,40 @@ export function inlinePlugin(app: App, index: FullIndex, settings: DataviewSetti
                 }
 
                 return Decoration.set(widgets, true);
+            }
+
+            /**
+             * Creates a widget for an inline field and returns a decoration that replaces the text of the field with the widget.
+             * @param view The EditorView
+             * @param line The line which the field sits on
+             * @param field The field to create a widget for
+             */
+            createFieldWidget(view: EditorView, line: Line, field: InlineField): Range<Decoration> {
+                const el = createSpan({
+                    cls: ["dataview", "dataview-inline-field", `dataview-inline-field-style-${settings.inlineFieldDisplayMode.toLowerCase()}`]
+                });
+
+                if (field.wrapping === "(") {
+                    el.appendChild(createSpan({
+                        cls: ["dataview", "inline-field-value", "inline-value-standalone"],
+                        text: field.value
+                    }))
+                } else if (field.wrapping === "[") {
+                    el.appendChild(createSpan({
+                        cls: ["dataview", "inline-field-key"],
+                        text: field.key
+                    }))
+                    el.appendChild(createSpan({
+                        cls: ["dataview", "inline-field-value"],
+                        text: field.value
+                    }))
+                }
+
+                return Decoration.replace({
+                    widget: new InlineWidget([], view.state.doc.sliceString(line.from+field.start, line.from+field.end), el, view),
+                    inclusive: false,
+                    block: false
+                }).range(line.from+field.start, line.from+field.end);
             }
 
             createQueryWidget(node: SyntaxNode, view: EditorView, currentFile: TFile) {
@@ -300,7 +414,7 @@ export function inlinePlugin(app: App, index: FullIndex, settings: DataviewSetti
                 } else if (isQuery&&!settings.enableInlineDataview || isJsQuery&&!settings.enableInlineDataviewJs) {
                     result = "(disabled; enable in settings)";
                     el.innerText = result;
-                } else if (isQuery && settings.enableInlineDataview) {
+                } else if (isQuery) {
                     code = text.substring(settings.inlineQueryPrefix.length).trim();
                     const field = tryOrPropogate(() => parseField(code));
                     if (!field.successful) {
@@ -353,7 +467,7 @@ export function inlinePlugin(app: App, index: FullIndex, settings: DataviewSetti
                 const classes = getCssClasses(props);
 
                 return Decoration.replace({
-                    widget: new InlineQueryWidget(classes, code, el, view),
+                    widget: new InlineWidget(classes, code, el, view),
                     inclusive: false,
                     block: false,
                 }).range(node.from - 1, node.to + 1);
