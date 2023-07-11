@@ -41,7 +41,7 @@ import { Literal } from '../data-model/value';
 import { DataviewInlineApi } from "../api/inline-api";
 import { renderValue } from "./render";
 import { SyntaxNode } from "@lezer/common";
-import { InlineField, extractInlineFields } from "data-import/inline-field";
+import { InlineField, extractInlineFields, extractFullLineField } from "data-import/inline-field";
 
 function selectionAndRangeOverlap(selection: EditorSelection, rangeFrom: number, rangeTo: number) {
     for (const range of selection.ranges) {
@@ -136,20 +136,18 @@ export function inlinePlugin(app: App, index: FullIndex, settings: DataviewSetti
         class implements PluginValue {
             decorations: DecorationSet;
             component: Component;
+            livepreview: boolean;
 
             constructor(view: EditorView) {
                 this.component = new Component();
                 this.component.load();
-                this.decorations = this.inlineRender(view) ?? Decoration.none;
-
+                this.decorations = Decoration.none;
+                this.livepreview = view.state.field(editorLivePreviewField);
+                this.updateTree(view);
             }
 
             update(update: ViewUpdate) {
-                // only activate in LP and not source mode
-                if (!update.state.field(editorLivePreviewField)) {
-                    this.decorations = Decoration.none;
-                    return;
-                }
+                this.livepreview = update.state.field(editorLivePreviewField)
                 if (update.docChanged) {
                     this.decorations = this.decorations.map(update.changes);
                     this.updateTree(update.view);
@@ -160,35 +158,37 @@ export function inlinePlugin(app: App, index: FullIndex, settings: DataviewSetti
                     return;
                 }
                 if (update.viewportChanged /*&& update.selectionSet*/) {
-                    this.decorations = this.inlineRender(update.view) ?? Decoration.none;
+                    this.decorations = Decoration.none;
+                    this.updateTree(update.view);
                     return;
                 }
             }
 
-            updateInlineFields(view: EditorView) {
-
-            }
-
             updateTree(view: EditorView) {
+                // Inline fields
                 for (const { from, to } of view.visibleRanges) {
-                    // Inline fields
                     const lineFrom = view.state.doc.lineAt(from).number;
                     const lineTo = view.state.doc.lineAt(to).number;
 
                     for (let i = lineFrom; i <= lineTo; i++) {
                         const line = view.state.doc.line(i);
 
-                        for (const field of extractInlineFields(line.text)) {
+                        let fields: Array<InlineField|null> = extractInlineFields(line.text);
+                        if (!fields.length) fields = [extractFullLineField(line.text) ?? null]
+                        for (const field of fields) {
+                            if (!field) break;
                             const { render } = this.fieldRenderInfo(view, line, field);
-                            if (render) {
+                            if (render || !this.livepreview) {
                                 this.addFieldDecorator(view, line, field);
                             } else {
                                 this.removeFieldDecorator(line, field);
                             }
                         }
                     }
-
-                    // Inline queries
+                }
+                // Inline queries
+                if (!this.livepreview) return;
+                for (const { from, to } of view.visibleRanges) {
                     syntaxTree(view.state).iterate({
                         from,
                         to,
@@ -247,9 +247,16 @@ export function inlinePlugin(app: App, index: FullIndex, settings: DataviewSetti
                 if (!exists) {
                     const currentFile = app.workspace.getActiveFile();
                     if (!currentFile) return;
-                    const newDeco = this.createFieldWidget(view, line, field);
+                    const newDeco = this.livepreview
+                        ? this.createFieldDecoratorLivePreview(view, line, field)
+                        : this.createFieldDecoratorSourceMode(view, line, field);
                     this.decorations = this.decorations.update({ add: newDeco, sort: true });
                 }
+            }
+
+            createFieldDecoratorLivePreview(view: EditorView, line: Line, field: InlineField): Range<Decoration>[] {
+                console.error(new Error("Method not implemented."))
+                return [];
             }
 
             /**
@@ -309,141 +316,63 @@ export function inlinePlugin(app: App, index: FullIndex, settings: DataviewSetti
                     || content.startsWith(settings.inlineJsQueryPrefix);
             }
 
-            inlineRender(view: EditorView) {
-                // still doesn't work as expected for tables and callouts
-                if (!index.initialized) return;
-                const currentFile = app.workspace.getActiveFile();
-                if (!currentFile) return;
-
-                const widgets: Range<Decoration>[] = [];
-                /* before:
-                 *     em for italics
-                 *     highlight for highlight
-                 * after:
-                 *     strong for bold
-                 *     strikethrough for strikethrough
-                 */
-
-                for (const { from, to } of view.visibleRanges) {
-                    // Inline fields
-                    const lineFrom = view.state.doc.lineAt(from).number;
-                    const lineTo = view.state.doc.lineAt(to).number;
-                    for (let i = lineFrom; i <= lineTo; i++) {
-                        const line = view.state.doc.line(i);
-                        for (const field of extractInlineFields(line.text)) {
-                            if (!this.fieldRenderInfo(view, line, field).render) return;
-                            const widget = this.createFieldWidget(view, line, field);
-                            widgets.concat(widget);
-                        }
-                    }
-                    // Inline queries: Need DOM to replace code block surrounding it
-                    syntaxTree(view.state).iterate({
-                        from,
-                        to,
-                        enter: ({ node }) => {
-                            if (!this.queryRenderInfo(view, node).render) return;
-                            const widget = this.createQueryWidget(node, view, currentFile);
-                            if (widget) {
-                                widgets.push(widget);
-                            }
-                        },
-                    });
-                }
-
-                return Decoration.set(widgets, true);
-            }
-
             /**
              * Creates a widget for an inline field and returns a decoration that replaces the text of the field with the widget.
              * @param view The EditorView
              * @param line The line which the field sits on
              * @param field The field to create a widget for
              */
-            createFieldWidget(view: EditorView, line: Line, field: InlineField): Range<Decoration>[] {
-                // TODO: This highlighting method can also work in source mode.
-
-                // Whitespace information
-                const key = view.state.sliceDoc(line.from+field.start+1, line.from+field.startValue-2);
-                const value = view.state.sliceDoc(line.from+field.startValue, line.from+field.end-1);
-                const keyLeftWS = key.length-key.trimStart().length;
-                const keyRightWS = key.length-key.trimEnd().length;
-                const valueLeftWS = value.length-value.trimStart().length;
-                const valueRightWS = value.length-value.trimEnd().length;
-
+            createFieldDecoratorSourceMode(view: EditorView, line: Line, field: InlineField): Range<Decoration>[] {
                 // Convenience variables
                 // Example: "[   key   ::   value   ]"
-                const openBracketPos = (line.from+field.start);                  // '[   '
-                const keyPos = (line.from+field.start+1) + keyLeftWS;            // 'key'
-                const colonPos = (line.from+field.startValue-2) - keyRightWS;    // '   ::   '
-                const valuePos = (line.from+field.startValue) + valueLeftWS;     // 'value'
-                const closeBracketPos = (line.from+field.end-1) - valueRightWS;  // '   ]'
-                const fieldEndPos = (line.from+field.end);
+                const openBracketPos = line.from+field.start;     // '['
+                const keyPos = line.from+field.start+1;           // '   key   '
+                const colonPos = line.from+field.startValue-2;    // '::'
+                const valuePos = line.from+field.startValue;      // '   value   '
+                const closeBracketPos = line.from+field.end-1;    // ']'
+                const fieldEndPos = line.from+field.end;
 
-                // The field is from the open bracket to the close bracket
-                const fieldFrom = openBracketPos;
-
-                // Sanity check (do not delete, use it!!)
-                console.log({
-                    complete_field: view.state.sliceDoc(fieldFrom,fieldEndPos),
-                    openBracket: view.state.sliceDoc(openBracketPos,keyPos),
-                    key: view.state.sliceDoc(keyPos,colonPos),
-                    colon: view.state.sliceDoc(colonPos,valuePos),
-                    value: view.state.sliceDoc(valuePos,closeBracketPos),
-                    closeBracket: view.state.sliceDoc(closeBracketPos,fieldEndPos)
-                });
+                // // Sanity check (do not delete, use it!!)
+                // console.log({
+                //     complete_field: view.state.sliceDoc(openBracketPos,fieldEndPos),
+                //     openBracket: view.state.sliceDoc(openBracketPos,keyPos),
+                //     key: view.state.sliceDoc(keyPos,colonPos),
+                //     colon: view.state.sliceDoc(colonPos,valuePos),
+                //     value: view.state.sliceDoc(valuePos,closeBracketPos),
+                //     closeBracket: view.state.sliceDoc(closeBracketPos,fieldEndPos)
+                // });
 
                 // More convenience constants
-                /** Hide the range. */
-                const hide = Decoration.replace({});
-                /** Render range as a standalone value. */
-                const markStandaloneValue = Decoration.mark({
-                    tagName: 'span', class: "dataview inline-field-standalone-value"
-                });
-                /** Render range as a key. */
-                const markKey = Decoration.mark({
-                    tagName: 'span', class: "dataview inline-field-key"
-                });
-                /** Render range as a value. */
-                const markValue = Decoration.mark({
-                    tagName: 'span', class: "dataview inline-field-value"
-                })
-                const markField = Decoration.mark({
+                const markBracket = Decoration.mark({
                     tagName: 'span',
-                    class: `dataview inline-field dataview-field-style-${settings.inlineFieldDisplayMode.toLowerCase()}`
+                    class: `dataview source-mode inline-field-bracket`,
+                })
+                const markColon = Decoration.mark({
+                    tagName: 'span',
+                    class: `dataview source-mode inline-field-colon`,
+                })
+                const markKey = Decoration.mark({
+                    tagName: 'span', inclusive: true,
+                    class: `dataview source-mode inline-field-key${field.wrapping === '(' ? '-hidden' : ''}`,
+                })
+                const markValue = Decoration.mark({
+                    tagName: 'span', inclusive: true,
+                    class: `dataview source-mode inline-field-value`
                 })
 
-                if (field.wrapping === "(") {
-                    return [
-                        // Mark the field
-                        markField.range(fieldFrom, fieldEndPos),
-                        // Hide the `[key::` part.
-                        hide.range(openBracketPos, valuePos),
-                        // Show the `value` part.
-                        markStandaloneValue.range(valuePos, closeBracketPos),
-                        // Hide the `]` part.
-                        hide.range(closeBracketPos,fieldEndPos)
-                    ];
-                } else if (field.wrapping === "[") {
-                    return [
-                        // Mark the field
-                        markField.range(fieldFrom, fieldEndPos),
-                        // Hide the `[` part.
-                        hide.range(openBracketPos, keyPos),
-                        // Show the `key` part.
-                        markKey.range(keyPos, colonPos),
-                        // Hide the `::` part.
-                        hide.range(colonPos, valuePos),
-                        // Show the `value` part.
-                        markValue.range(valuePos, closeBracketPos),
-                        // Hide the `]` part.
-                        hide.range(closeBracketPos,fieldEndPos)
-                    ];
-                } else if (field.wrapping === "emoji-shorthand") {
-                    // To hand emoji-shorthand you have to enable parsing them where
-                    // we originally get the `InlineField`s
-                    return [];
+                // Mark the syntax parts for CSS highlighting.
+                // This is what Decoration.mark was designed for.
+                let decorations = [markColon.range(colonPos, valuePos)];
+                if (field.wrapping) {
+                    markBracket.range(openBracketPos, keyPos);
+                    markBracket.range(closeBracketPos, fieldEndPos);
                 }
-                return [];
+
+                // Don't add if empty.
+                if (keyPos!==colonPos) decorations.push(markKey.range(keyPos, colonPos))
+                if (valuePos!==closeBracketPos) decorations.push(markValue.range(valuePos, closeBracketPos))
+
+                return decorations;
             }
 
             createQueryWidget(node: SyntaxNode, view: EditorView, currentFile: TFile) {
