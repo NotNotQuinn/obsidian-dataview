@@ -92,9 +92,12 @@
 }
 
 /* Source mode */
-/* Class exists: .source-mode-inline-field-key */
-/* Class exists: .source-mode-inline-field-value */
-/* Class exists: .source-mode-inline-field-standalone-value */
+/*
+Unused classes:
+    .source-mode-inline-field-key
+    .source-mode-inline-field-value
+    .source-mode-inline-field-standalone-value
+*/
 
 .dataview.source-mode-inline-field-key-hidden,
 .dataview.source-mode-inline-field-bracket {
@@ -107,19 +110,22 @@
 
 /* Disable link highlighting for square brackets in source mode when there is a dataview field inside. */
 @media (hover: hover) {
-    .cm-s-obsidian span.cm-link:hover:has( > span.dataview.dataview) {
+    .cm-s-obsidian:not(.is-live-preview) span.cm-link:hover:has( > span.dataview):not(:where(.cm-hmd-internal-link,.cm-formatting-link)) {
         color: unset;
         text-decoration-line: unset;
     }
 }
-.cm-s-obsidian span.cm-link:has( > span.dataview) {
+.cm-s-obsidian:not(.is-live-preview) span.cm-link:has( > span.dataview):not(:where(.cm-hmd-internal-link,.cm-formatting-link)) {
     color: unset;
     word-break: unset;
 }
 
 /* Source mode full-line fields */
-/* Class exists: .source-mode-fullline-field-value */
-/* Class exists: .source-mode-fullline-field-key */
+/*
+Unused classes:
+    .source-mode-fullline-field-value
+    .source-mode-fullline-field-key
+*/
 
 .dataview.source-mode-fullline-field-colon {
     color: var(--text-accent);
