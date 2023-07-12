@@ -345,19 +345,19 @@ export function inlinePlugin(app: App, index: FullIndex, settings: DataviewSetti
                 // More convenience constants
                 const markBracket = Decoration.mark({
                     tagName: 'span',
-                    class: `dataview source-mode inline-field-bracket`,
+                    class: `dataview source-mode-inline-field-bracket`,
                 })
                 const markColon = Decoration.mark({
                     tagName: 'span',
-                    class: `dataview source-mode inline-field-colon`,
+                    class: `dataview source-mode-inline-field-colon`,
                 })
                 const markKey = Decoration.mark({
                     tagName: 'span', inclusive: true,
-                    class: `dataview source-mode inline-field-key${field.wrapping === '(' ? '-hidden' : ''}`,
+                    class: `dataview source-mode-inline-field-key${field.wrapping === '(' ? '-hidden' : ''}`,
                 })
                 const markValue = Decoration.mark({
                     tagName: 'span', inclusive: true,
-                    class: `dataview source-mode inline-field-value`
+                    class: `dataview source-mode-inline-field-value`
                 })
 
                 // Mark the syntax parts for CSS highlighting.

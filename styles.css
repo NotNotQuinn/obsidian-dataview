@@ -69,6 +69,8 @@
 /** Inline Fields **/
 /*******************/
 
+/* Live preview / Reading mode */
+
 .dataview.inline-field-key {
     padding-left: 8px;
     padding-right: 8px;
@@ -85,12 +87,20 @@
     color: var(--text-nav-selected);
 }
 
-.dataview.inline-field-standalone-value {
-    padding-left: 8px;
-    padding-right: 8px;
-    font-family: var(--font-monospace);
-    background-color: var(--background-secondary-alt);
-    color: var(--text-nav-selected);
+/* Source mode */
+
+.dataview.source-mode-inline-field-key,
+.dataview.source-mode-inline-field-value {
+    color: var(--text-normal);
+}
+
+.dataview.source-mode-inline-field-key-hidden,
+.dataview.source-mode-inline-field-bracket {
+    color: var(--text-faint);
+}
+
+.dataview.source-mode-inline-field-colon {
+    color: var(--text-accent);
 }
 
 /***************/
