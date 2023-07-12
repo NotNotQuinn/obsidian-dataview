@@ -1,5 +1,6 @@
 /** Live Preview padding fixes, specifically for DataviewJS custom HTML elements. */
-.is-live-preview .block-language-dataviewjs > p, .is-live-preview .block-language-dataviewjs > span {
+.is-live-preview .block-language-dataviewjs > p,
+.is-live-preview .block-language-dataviewjs > span {
     line-height: 1.0;
 }
 
@@ -16,7 +17,8 @@
     width: 100%;
 }
 
-.table-view-table > thead > tr, .table-view-table > tbody > tr {
+.table-view-table > thead > tr,
+.table-view-table > tbody > tr {
     margin-top: 1em;
     margin-bottom: 1em;
     text-align: left;
@@ -44,7 +46,8 @@
     max-width: 100%;
 }
 
-.table-view-table ul, .table-view-table ol {
+.table-view-table ul,
+.table-view-table ol {
     margin-block-start: 0.2em !important;
     margin-block-end: 0.2em !important;
 }
@@ -79,7 +82,8 @@
     color: var(--text-nav-selected);
 }
 
-.dataview.inline-field-value {
+.dataview.inline-field-value,
+.dataview.inline-field-standalone-value {
     padding-left: 8px;
     padding-right: 8px;
     font-family: var(--font-monospace);
@@ -107,13 +111,15 @@
 /** Task View **/
 /***************/
 
-.dataview.task-list-item, .dataview.task-list-basic-item {
+.dataview.task-list-item,
+.dataview.task-list-basic-item {
     margin-top: 3px;
     margin-bottom: 3px;
     transition: 0.4s;
 }
 
-.dataview.task-list-item:hover, .dataview.task-list-basic-item:hover {
+.dataview.task-list-item:hover,
+.dataview.task-list-basic-item:hover {
     background-color: var(--text-selection);
     box-shadow: -40px 0 0 var(--text-selection);
     cursor: pointer;
