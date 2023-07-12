@@ -2,39 +2,6 @@
 // Query Settings //
 ////////////////////
 
-/** Ways to display inline fields in the editor/viewer. */
-export enum InlineFieldDisplayMode {
-    /**
-     * In addition to hiding brackets and double colon where appropriate,
-     * displays a lighter colour background "block" for the key, and a darker
-     * "block" around the value. Font is monospace.
-     */
-    BLOCKY = "Blocky",
-    /**
-     * In addition to hiding brackets and double colon where appropriate,
-     * underlines the field key (lighter colour), and underlines the field
-     * value (darker colour). Underlining is shown in all modes.
-     */
-    UNDERLINED = "Underlined",
-    /**
-     * Hides brackets and double colon where appropriate.
-     */
-    PLAINTEXT = "Plaintext",
-}
-
-export const InlineFieldDisplayMode_OptionDescriptions: [InlineFieldDisplayMode, string][] = [
-    [InlineFieldDisplayMode.BLOCKY,
-       `In addition to hiding brackets and double colon where appropriate, displays
-        a lighter colour background "block" for the key, and a darker "block" around
-        the value. Font is monospace.`],
-    [InlineFieldDisplayMode.UNDERLINED,
-       `In addition to hiding brackets and double colon where appropriate, underlines
-        the field key in a lighter colour, and underlines the field value in a darker
-        colour.`],
-    [InlineFieldDisplayMode.PLAINTEXT,
-       `Hides brackets and double colon where appropriate.`]
-]
-
 export interface QuerySettings {
     /** What to render 'null' as in tables. Defaults to '-'. */
     renderNullAs: string;
@@ -60,8 +27,6 @@ export interface QuerySettings {
     defaultDateTimeFormat: string;
     /** Maximum depth that objects will be expanded when being rendered recursively. */
     maxRecursiveRenderDepth: number;
-    /** How to display inline fields in the editor/viewer. */
-    inlineFieldDisplayMode: InlineFieldDisplayMode;
     /** The name of the default ID field ('File'). */
     tableIdColumnName: string;
     /** The name of default ID fields on grouped data ('Group'). */
@@ -83,7 +48,7 @@ export const DEFAULT_QUERY_SETTINGS: QuerySettings = {
     defaultDateFormat: "MMMM dd, yyyy",
     defaultDateTimeFormat: "h:mm a - MMMM dd, yyyy",
     maxRecursiveRenderDepth: 4,
-    inlineFieldDisplayMode: InlineFieldDisplayMode.BLOCKY,
+
     tableIdColumnName: "File",
     tableGroupColumnName: "Group",
     showResultCount: true,

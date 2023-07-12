@@ -1,16 +1,10 @@
-import {
-    App, Component, debounce, MarkdownPostProcessorContext,
-    Plugin, PluginSettingTab, Setting
-} from "obsidian";
+import { App, Component, debounce, MarkdownPostProcessorContext, Plugin, PluginSettingTab, Setting } from "obsidian";
 import { renderErrorPre } from "ui/render";
 import { FullIndex } from "data-index/index";
 import { parseField } from "expression/parse";
 import { tryOrPropogate } from "util/normalize";
 import { DataviewApi, isDataviewDisabled } from "api/plugin-api";
-import {
-    DataviewSettings, DEFAULT_QUERY_SETTINGS, DEFAULT_SETTINGS,
-    InlineFieldDisplayMode, InlineFieldDisplayMode_OptionDescriptions
-} from "settings";
+import { DataviewSettings, DEFAULT_QUERY_SETTINGS, DEFAULT_SETTINGS } from "settings";
 import { DataviewInlineRenderer } from "ui/views/inline-view";
 import { DataviewInlineJSRenderer } from "ui/views/js-view";
 import { currentLocale } from "util/locale";
@@ -467,30 +461,6 @@ class GeneralSettingsTab extends PluginSettingTab {
                         this.plugin.index.touch();
                     })
             );
-
-        new Setting(this.containerEl)
-            .setName("Inline Field Display")
-            .setDesc(createFragment( el => {
-                el.createEl('span', { text: "Control how inline fields are displayed in the editor or viewer." });
-                el.createEl('br');
-                for (const [title, description] of InlineFieldDisplayMode_OptionDescriptions) {
-                    el.createEl('br');
-                    el.createEl('div', { text: title, attr: { style: "font-size: 1.2em" } })
-                    el.createEl('span', { text: description })
-                    el.createEl('br');
-                }
-            }))
-            .setTooltip("[like:: this] or (example:: like this)", { placement:"left" })
-            .addDropdown(dropdown => {
-                Object.values(InlineFieldDisplayMode).forEach(opt => dropdown.addOption(opt, opt));
-                dropdown
-                    .setValue(this.plugin.settings.inlineFieldDisplayMode)
-                    .onChange(val => this.plugin.updateSettings({
-                        inlineFieldDisplayMode: val as any
-                    }))
-            }
-            )
-
 
         this.containerEl.createEl("h3", { text: "Table Settings" });
 
