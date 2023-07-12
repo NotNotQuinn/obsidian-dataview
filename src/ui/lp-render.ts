@@ -178,10 +178,10 @@ export function inlinePlugin(app: App, index: FullIndex, settings: DataviewSetti
                         for (const field of fields) {
                             if (!field) break;
                             const { render } = this.fieldRenderInfo(view, line, field);
-                            if (render || !this.livepreview) {
-                                this.addFieldDecorator(view, line, field);
-                            } else {
+                            if (!render) {
                                 this.removeFieldDecorator(line, field);
+                            } else if (render) {
+                                this.addFieldDecorator(view, line, field);
                             }
                         }
                     }
@@ -240,6 +240,11 @@ export function inlinePlugin(app: App, index: FullIndex, settings: DataviewSetti
              * @param field The field
              */
             addFieldDecorator(view: EditorView, line: Line, field: InlineField) {
+                // BUG: It is possible that someone puts an inline query inside an inline field, making this
+                //      `exists` variable true, thus not creating any markings for that specific field.
+                //      OR having the visuals for the field, but not running the query. It's one or the other.
+                // To solve (probably): Create a separate this.decorations variable for fields and queries.
+                //                      You will have to merge them at the bottom of this file in `decorations: () => ...`.
                 let exists = false;
                 this.decorations.between(line.from+field.start, line.from+field.end, (_from, _to, _value) => {
                     exists = true;
@@ -290,7 +295,7 @@ export function inlinePlugin(app: App, index: FullIndex, settings: DataviewSetti
              */
             fieldRenderInfo(view: EditorView, line: Line, field: InlineField): { render: any; } {
                 const isSelected = selectionAndRangeOverlap(view.state.selection, line.from+field.start, line.from+field.end);
-                return { render: !isSelected };
+                return { render: !(this.livepreview && isSelected) };
             }
 
             // checks whether a node should get rendered/unrendered
@@ -325,47 +330,57 @@ export function inlinePlugin(app: App, index: FullIndex, settings: DataviewSetti
             createFieldDecoratorSourceMode(view: EditorView, line: Line, field: InlineField): Range<Decoration>[] {
                 // Convenience variables
                 // Example: "[   key   ::   value   ]"
-                const openBracketPos = line.from+field.start;     // '['
-                const keyPos = line.from+field.start+1;           // '   key   '
-                const colonPos = line.from+field.startValue-2;    // '::'
-                const valuePos = line.from+field.startValue;      // '   value   '
-                const closeBracketPos = line.from+field.end-1;    // ']'
-                const fieldEndPos = line.from+field.end;
+                let openBracketPos = line.from+field.start;     // '['
+                let keyPos = line.from+field.start+1;           // '   key   '
+                let colonPos = line.from+field.startValue-2;    // '::'
+                let valuePos = line.from+field.startValue;      // '   value   '
+                let closeBracketPos = line.from+field.end-1;    // ']'
+                let fieldEndPos = line.from+field.end;
 
-                // // Sanity check (do not delete, use it!!)
-                // console.log({
-                //     complete_field: view.state.sliceDoc(openBracketPos,fieldEndPos),
-                //     openBracket: view.state.sliceDoc(openBracketPos,keyPos),
-                //     key: view.state.sliceDoc(keyPos,colonPos),
-                //     colon: view.state.sliceDoc(colonPos,valuePos),
-                //     value: view.state.sliceDoc(valuePos,closeBracketPos),
-                //     closeBracket: view.state.sliceDoc(closeBracketPos,fieldEndPos)
-                // });
+                // Full-line fields don't have brackets
+                if (typeof field.wrapping !== "string") {
+                    keyPos = openBracketPos;
+                    closeBracketPos = fieldEndPos
+                }
+
+                // Sanity check (don't delete it, use it)
+                // Inside if(false) so that the code stays updated (i.e. you get an error)
+                if (true) console.log({
+                    complete_field: view.state.sliceDoc(openBracketPos,fieldEndPos),
+                    openBracket: view.state.sliceDoc(openBracketPos,keyPos),
+                    key: view.state.sliceDoc(keyPos,colonPos),
+                    colon: view.state.sliceDoc(colonPos,valuePos),
+                    value: view.state.sliceDoc(valuePos,closeBracketPos),
+                    closeBracket: view.state.sliceDoc(closeBracketPos,fieldEndPos)
+                });
 
                 // More convenience constants
+                const inline_or_fullline = typeof field.wrapping === "string" ? 'inline' : 'fullline';
+                const isRounded = field.wrapping === '(';
+                // If you edit these classes, be sure to update the CSS
                 const markBracket = Decoration.mark({
-                    tagName: 'span',
+                    tagName: 'span', // full-line not possible
                     class: `dataview source-mode-inline-field-bracket`,
                 })
                 const markColon = Decoration.mark({
                     tagName: 'span',
-                    class: `dataview source-mode-inline-field-colon`,
+                    class: `dataview source-mode-${inline_or_fullline}-field-colon`,
                 })
                 const markKey = Decoration.mark({
-                    tagName: 'span', inclusive: true,
-                    class: `dataview source-mode-inline-field-key${field.wrapping === '(' ? '-hidden' : ''}`,
+                    tagName: 'span', inclusive: true, // full-line and -hidden are not possible together
+                    class: `dataview source-mode-${inline_or_fullline}-field-key${isRounded ? '-hidden' : ''}`,
                 })
                 const markValue = Decoration.mark({
-                    tagName: 'span', inclusive: true,
-                    class: `dataview source-mode-inline-field-value`
+                    tagName: 'span', inclusive: true, // full-line and -standalone are not possible together
+                    class: `dataview source-mode-${inline_or_fullline}-field${isRounded ? '-standalone' : ''}-value`
                 })
 
                 // Mark the syntax parts for CSS highlighting.
                 // This is what Decoration.mark was designed for.
                 let decorations = [markColon.range(colonPos, valuePos)];
-                if (field.wrapping) {
-                    markBracket.range(openBracketPos, keyPos);
-                    markBracket.range(closeBracketPos, fieldEndPos);
+                if (typeof field.wrapping === "string") {
+                    decorations.push(markBracket.range(openBracketPos, keyPos));
+                    decorations.push(markBracket.range(closeBracketPos, fieldEndPos));
                 }
 
                 // Don't add if empty.
