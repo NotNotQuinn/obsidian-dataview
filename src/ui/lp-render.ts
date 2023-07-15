@@ -367,11 +367,11 @@ export function inlinePlugin(app: App, index: FullIndex, settings: DataviewSetti
                     class: `dataview source-mode-${inline_or_fullline}-field-colon`,
                 })
                 const markKey = Decoration.mark({
-                    tagName: 'span', inclusive: true, // full-line and -hidden are not possible together
+                    tagName: 'span', // full-line and -hidden are not possible together
                     class: `dataview source-mode-${inline_or_fullline}-field-key${isRounded ? '-hidden' : ''}`,
                 })
                 const markValue = Decoration.mark({
-                    tagName: 'span', inclusive: true, // full-line and -standalone are not possible together
+                    tagName: 'span', // full-line and -standalone are not possible together
                     class: `dataview source-mode-${inline_or_fullline}-field${isRounded ? '-standalone' : ''}-value`
                 })
 
